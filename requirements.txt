@@ -6,6 +6,12 @@ joblib>=1.1.0
 tqdm>=4.62.0
 pyyaml>=6.0
 
+# Suporte a ONNX
+onnx>=1.14.0
+onnxruntime>=1.15.0
+skl2onnx>=1.14.0
+tf2onnx>=1.14.0  # Para converter modelos TensorFlow se necessário
+
 # Para desenvolvimento e testes
 pytest>=7.0.0
 black>=22.1.0

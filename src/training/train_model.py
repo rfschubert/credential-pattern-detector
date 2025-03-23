@@ -1,213 +1,271 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+Script de treinamento para o detector de padrões de credenciais.
+Treina um modelo de classificação para identificar se um texto contém credenciais.
+Também exporta automaticamente o modelo para formato ONNX.
+"""
+
 import os
-import pickle
+import sys
 import logging
-import argparse
 import yaml
-from typing import Dict, Any, List, Tuple
-import time
+import pickle
+from typing import Dict, Any, Optional
 
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
 
-from .data_processor import DataProcessor
-from ..utils.text_utils import extract_features
+# Adicionar diretório raiz ao path para importação
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
+from src.training.data_processor import load_data, generate_datasets
+from src.utils.text_utils import is_binary_text
+
+# Verificar se temos o módulo de exportação
+try:
+    from src.export.export_onnx import export_model as export_to_onnx
+    ONNX_AVAILABLE = True
+except ImportError:
+    ONNX_AVAILABLE = False
+    logging.warning("Módulo ONNX não disponível. O modelo não será exportado para ONNX.")
 
 # Configurar logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-def train_model(
-    data_processor: DataProcessor, 
-    config: Dict[str, Any],
-    output_dir: str
-) -> Tuple[Dict[str, Any], float]:
+def extract_features(text: str) -> Dict[str, Any]:
     """
-    Treina um modelo de detecção de credenciais.
+    Extrai características do texto para uso no treinamento.
     
     Args:
-        data_processor: Processador de dados
-        config: Configuração de treinamento
-        output_dir: Diretório para salvar o modelo
+        text: Texto a ser analisado
         
     Returns:
-        Dicionário com o modelo e vectorizer, e a acurácia do modelo
+        Dicionário de características extraídas do texto
     """
-    # Garantir que temos dados processados
-    if data_processor.X_train is None:
-        data_processor.generate_train_test_split()
-        
-    # Extrair características
-    logger.info("Extraindo características dos dados de treinamento...")
-    X_train_features = data_processor.extract_features_batch(data_processor.X_train)
-    logger.info("Extraindo características dos dados de teste...")
-    X_test_features = data_processor.extract_features_batch(data_processor.X_test)
+    features = {
+        "length": len(text),
+        "has_special_chars": any(c in "!@#$%^&*()_+-=[]{}|;:'\"<>,.?/~`" for c in text),
+        "uppercase_ratio": sum(1 for c in text if c.isupper()) / max(len(text), 1),
+        "digit_ratio": sum(1 for c in text if c.isdigit()) / max(len(text), 1),
+        "is_binary": is_binary_text(text),
+        "text": text  # Mantendo o texto original para uso na vetorização
+    }
+    return features
+
+def load_config(config_path: str = "config/training_config.yaml") -> Dict[str, Any]:
+    """
+    Carrega a configuração de treinamento do arquivo YAML.
     
-    # Criar e treinar o vectorizer
-    logger.info("Treinando o vectorizer TF-IDF...")
-    vectorizer = TfidfVectorizer(
-        max_features=config.get('vectorizer_max_features', 1000),
-        min_df=config.get('vectorizer_min_df', 2),
-        max_df=config.get('vectorizer_max_df', 0.95),
-        ngram_range=(1, config.get('vectorizer_ngram_max', 2))
+    Args:
+        config_path: Caminho para o arquivo de configuração
+        
+    Returns:
+        Dicionário com as configurações de treinamento
+    """
+    try:
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+        return config
+    except Exception as e:
+        logger.warning(f"Erro ao carregar configuração: {e}")
+        # Configurações padrão
+        return {
+            "model_type": "random_forest",
+            "rf_n_estimators": 200,
+            "rf_max_depth": 20,
+            "rf_min_samples_split": 2,
+            "rf_min_samples_leaf": 1,
+            "vectorizer_max_features": 1500,
+            "vectorizer_min_df": 2,
+            "vectorizer_max_df": 0.95,
+            "vectorizer_ngram_max": 3,
+            "use_grid_search": False
+        }
+
+def train_model(config: Dict[str, Any], train_dir: str = "data/processed", test_size: float = 0.2) -> Dict[str, Any]:
+    """
+    Treina o modelo usando os dados fornecidos.
+    
+    Args:
+        config: Configurações de treinamento
+        train_dir: Diretório contendo os dados de treinamento
+        test_size: Proporção dos dados a serem usados para teste
+        
+    Returns:
+        Dicionário contendo o modelo treinado e métricas
+    """
+    # Carregar dados de treinamento
+    credentials = load_data(os.path.join(train_dir, "credentials.jsonl"))
+    non_credentials = load_data(os.path.join(train_dir, "non_credentials.jsonl"))
+    
+    # Gerar conjuntos de dados balanceados
+    train_data, test_data = generate_datasets(
+        credentials, 
+        non_credentials, 
+        test_size=test_size
     )
     
-    # Transformar os dados de treinamento
-    X_train_vec = vectorizer.fit_transform(X_train_features)
+    # Extrair características
+    logger.info("Extraindo características dos dados de treinamento...")
+    X_train_features = []
+    y_train = []
     
-    # Criar e treinar o modelo
+    for text, label in tqdm(train_data, desc="Extraindo características"):
+        features = extract_features(text)
+        X_train_features.append(features)
+        y_train.append(label)
+    
+    logger.info("Extraindo características dos dados de teste...")
+    X_test_features = []
+    y_test = []
+    
+    for text, label in tqdm(test_data, desc="Extraindo características"):
+        features = extract_features(text)
+        X_test_features.append(features)
+        y_test.append(label)
+    
+    # Vetorização de texto
+    logger.info("Treinando o vectorizer TF-IDF...")
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    
+    vectorizer = TfidfVectorizer(
+        max_features=config["vectorizer_max_features"],
+        min_df=config["vectorizer_min_df"],
+        max_df=config["vectorizer_max_df"],
+        ngram_range=(1, config["vectorizer_ngram_max"]),
+        strip_accents="unicode",
+        analyzer="char_wb"
+    )
+    
+    X_train_text = [f["text"] for f in X_train_features]
+    X_train_tfidf = vectorizer.fit_transform(X_train_text)
+    
+    X_test_text = [f["text"] for f in X_test_features]
+    X_test_tfidf = vectorizer.transform(X_test_text)
+    
+    # Treinamento do modelo
     logger.info("Treinando o modelo de classificação...")
-    model_type = config.get('model_type', 'random_forest')
-    
-    if model_type == 'random_forest':
-        if config.get('use_grid_search', False):
-            # Usar GridSearchCV para encontrar os melhores parâmetros
-            logger.info("Realizando busca por hiperparâmetros com GridSearchCV...")
-            param_grid = {
-                'n_estimators': [50, 100, 200],
-                'max_depth': [None, 10, 20, 30],
-                'min_samples_split': [2, 5, 10],
-                'min_samples_leaf': [1, 2, 4]
-            }
-            
-            model = GridSearchCV(
-                RandomForestClassifier(random_state=42),
-                param_grid,
-                cv=5,
-                scoring='f1',
-                n_jobs=-1
-            )
-            
-            model.fit(X_train_vec, data_processor.y_train)
-            logger.info(f"Melhores parâmetros: {model.best_params_}")
-            model = model.best_estimator_
-        else:
-            # Usar parâmetros definidos na configuração
-            model = RandomForestClassifier(
-                n_estimators=config.get('rf_n_estimators', 100),
-                max_depth=config.get('rf_max_depth', None),
-                min_samples_split=config.get('rf_min_samples_split', 2),
-                min_samples_leaf=config.get('rf_min_samples_leaf', 1),
-                random_state=42
-            )
-            
-            model.fit(X_train_vec, data_processor.y_train)
+    if config["model_type"] == "random_forest":
+        from sklearn.ensemble import RandomForestClassifier
+        
+        model = RandomForestClassifier(
+            n_estimators=config["rf_n_estimators"],
+            max_depth=config["rf_max_depth"],
+            min_samples_split=config["rf_min_samples_split"],
+            min_samples_leaf=config["rf_min_samples_leaf"],
+            random_state=42,
+            n_jobs=-1
+        )
     else:
-        raise ValueError(f"Tipo de modelo não suportado: {model_type}")
+        raise ValueError(f"Tipo de modelo não suportado: {config['model_type']}")
     
-    # Avaliar o modelo
+    # Treinamento
+    model.fit(X_train_tfidf, y_train)
+    
+    # Avaliação
     logger.info("Avaliando o modelo...")
-    X_test_vec = vectorizer.transform(X_test_features)
+    y_pred = model.predict(X_test_tfidf)
+    accuracy = (y_pred == y_test).mean()
+    logger.info(f"Acurácia: {accuracy}")
     
-    y_pred = model.predict(X_test_vec)
-    y_pred_proba = model.predict_proba(X_test_vec)[:, 1]
+    classification_rep = classification_report(
+        y_test, 
+        y_pred, 
+        target_names=["Não Credencial", "Credencial"]
+    )
+    logger.info(f"Relatório de classificação:\n{classification_rep}")
     
-    # Métricas de avaliação
-    accuracy = accuracy_score(data_processor.y_test, y_pred)
-    logger.info(f"Acurácia: {accuracy:.4f}")
-    
-    # Relatório de classificação
-    report = classification_report(data_processor.y_test, y_pred, target_names=['Não Credencial', 'Credencial'])
-    logger.info(f"Relatório de classificação:\n{report}")
-    
-    # Matriz de confusão
-    conf_matrix = confusion_matrix(data_processor.y_test, y_pred)
+    conf_matrix = confusion_matrix(y_test, y_pred)
     logger.info(f"Matriz de confusão:\n{conf_matrix}")
     
-    # Salvar o modelo
-    os.makedirs(output_dir, exist_ok=True)
-    
-    model_data = {
-        'model': model,
-        'vectorizer': vectorizer,
-        'config': config,
-        'metrics': {
-            'accuracy': accuracy,
-            'confusion_matrix': conf_matrix.tolist(),
-            'classification_report': report
-        },
-        'training_date': time.strftime('%Y-%m-%d %H:%M:%S')
-    }
-    
-    model_path = os.path.join(output_dir, 'credential_detector_model.pkl')
-    with open(model_path, 'wb') as f:
-        pickle.dump(model_data, f)
-        
-    logger.info(f"Modelo salvo em {model_path}")
-    
-    # Salvar relatório em formato de texto
-    report_path = os.path.join(output_dir, 'training_report.txt')
-    with open(report_path, 'w') as f:
-        f.write(f"Acurácia: {accuracy:.4f}\n\n")
-        f.write(f"Relatório de classificação:\n{report}\n\n")
+    # Salvar relatório de treinamento
+    report_path = os.path.join("models", "training_report.txt")
+    with open(report_path, "w") as f:
+        f.write(f"Acurácia: {accuracy}\n\n")
+        f.write(f"Relatório de classificação:\n{classification_rep}\n\n")
         f.write(f"Matriz de confusão:\n{conf_matrix}\n\n")
-        f.write(f"Configuração de treinamento:\n{yaml.dump(config)}\n")
-        
-    return model_data, accuracy
-
-def main():
-    """Função principal para treinamento do modelo."""
-    parser = argparse.ArgumentParser(description='Treina um modelo de detecção de credenciais')
-    parser.add_argument('--config', type=str, default='config/training_config.yaml',
-                        help='Caminho para o arquivo de configuração de treinamento')
-    parser.add_argument('--data-dir', type=str, default=None,
-                        help='Diretório onde os dados estão armazenados')
-    parser.add_argument('--output-dir', type=str, default=None,
-                        help='Diretório onde o modelo treinado será salvo')
-    parser.add_argument('--min-examples', type=int, default=200,
-                        help='Número mínimo de exemplos para cada classe')
-    args = parser.parse_args()
+        f.write("Configuração de treinamento:\n")
+        for key, value in config.items():
+            f.write(f"{key}: {value}\n")
     
-    # Configuração padrão
-    config = {
-        'model_type': 'random_forest',
-        'rf_n_estimators': 100,
-        'rf_max_depth': None,
-        'rf_min_samples_split': 2,
-        'rf_min_samples_leaf': 1,
-        'vectorizer_max_features': 1000,
-        'vectorizer_min_df': 2,
-        'vectorizer_max_df': 0.95,
-        'vectorizer_ngram_max': 2,
-        'use_grid_search': False
+    # Retornar o modelo treinado e métricas
+    return {
+        "classifier": model,
+        "vectorizer": vectorizer,
+        "feature_extractor": extract_features,
+        "config": config,
+        "confidence_threshold": 0.7,
+        "accuracy": accuracy,
+        "classification_report": classification_rep,
+        "confusion_matrix": conf_matrix
     }
+
+def save_model(model_data: Dict[str, Any], output_path: str = "models/credential_detector_model.pkl") -> str:
+    """
+    Salva o modelo treinado em um arquivo.
     
-    # Carregar configuração de arquivo, se disponível
-    if os.path.exists(args.config):
-        with open(args.config, 'r') as f:
-            loaded_config = yaml.safe_load(f)
-            config.update(loaded_config)
-    else:
-        logger.warning(f"Arquivo de configuração não encontrado: {args.config}")
-        logger.info("Usando configuração padrão")
+    Args:
+        model_data: Dicionário contendo o modelo treinado e métricas
+        output_path: Caminho para salvar o modelo
         
-        # Criar diretório de configuração e salvar configuração padrão
-        os.makedirs(os.path.dirname(args.config), exist_ok=True)
-        with open(args.config, 'w') as f:
-            yaml.dump(config, f)
+    Returns:
+        Caminho do arquivo salvo
+    """
+    # Criar diretório se não existir
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
-    # Definir diretório de saída padrão se não for fornecido
-    if args.output_dir is None:
-        args.output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models")
+    # Salvar o modelo
+    with open(output_path, "wb") as f:
+        pickle.dump(model_data, f)
+    
+    logger.info(f"Modelo salvo em {output_path}")
+    return output_path
+
+def main() -> None:
+    """
+    Função principal para treinamento do modelo.
+    """
+    # Carregar configuração
+    config_path = "config/training_config.yaml"
+    config = load_config(config_path)
     
     logger.info(f"Configuração de treinamento: {config}")
     
-    # Inicializar processador de dados
-    data_processor = DataProcessor(data_dir=args.data_dir)
+    # Treinar o modelo
+    model_data = train_model(config)
     
-    # Carregar ou criar exemplos
-    data_processor.load_or_create_examples(min_examples=args.min_examples)
+    # Salvar o modelo
+    model_path = save_model(model_data)
     
-    # Gerar divisão de treinamento e teste
-    data_processor.generate_train_test_split()
-    
-    # Treinar modelo
-    train_model(data_processor, config, args.output_dir)
-    
+    # Exportar para ONNX se disponível
+    if ONNX_AVAILABLE:
+        logger.info("Exportando modelo para ONNX...")
+        onnx_output_dir = "models/onnx"
+        try:
+            export_results = export_to_onnx(
+                model_path=model_path,
+                output_dir=onnx_output_dir,
+                model_name="credential_detector",
+                test_examples=[
+                    "Olá, como vai você?",
+                    "Minha senha é X#9pL@7!2ZqR e meu usuário é joao123",
+                    "API_KEY=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
+                    "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ"
+                ]
+            )
+            logger.info(f"Modelo exportado com sucesso para ONNX em {onnx_output_dir}")
+            for key, path in export_results.items():
+                logger.info(f"- {key}: {path}")
+        except Exception as e:
+            logger.error(f"Erro ao exportar modelo para ONNX: {e}")
+            logger.exception(e)
+
 if __name__ == "__main__":
     main() 

@@ -14,6 +14,7 @@ Uma inteligência artificial projetada para identificar padrões de credenciais 
 - Baixa taxa de falsos positivos
 - Rápido o suficiente para uso em aplicações em tempo real
 - Fácil integração com diferentes linguagens e plataformas
+- **Novo**: Exportação para ONNX, permitindo uso em PHP, JavaScript e outras linguagens
 
 ## Estrutura do Projeto
 
@@ -24,11 +25,13 @@ credential-pattern-detector/
 │   ├── processed/             # Dados processados para treinamento
 │   └── test/                  # Conjunto de testes
 ├── models/                    # Modelos treinados
+│   └── onnx/                  # Modelos exportados para ONNX
 ├── notebooks/                 # Jupyter notebooks para experimentação
 ├── src/                       # Código fonte
 │   ├── detector/              # Módulo principal de detecção
 │   ├── training/              # Scripts de treinamento
 │   ├── evaluation/            # Scripts de avaliação
+│   ├── export/                # Scripts para exportação de modelos
 │   └── utils/                 # Utilitários
 ├── tests/                     # Testes unitários e de integração
 ├── examples/                  # Exemplos de uso
@@ -143,6 +146,36 @@ docker-compose run --rm app python -m src.evaluation.evaluate --model models/cre
 # Localmente
 python -m src.evaluation.evaluate --model models/credential_detector_model.pkl
 ```
+
+## Exportação para Outras Linguagens (ONNX)
+
+O detector pode ser exportado para o formato ONNX (Open Neural Network Exchange), permitindo seu uso em outras linguagens como PHP, JavaScript, C#, Java, etc.
+
+### Exportando o modelo para ONNX
+
+```bash
+# Com Docker
+docker-compose run --rm app python -m src.export.export_onnx --model models/credential_detector_model.pkl --output models/onnx
+
+# Localmente
+python -m src.export.export_onnx --model models/credential_detector_model.pkl --output models/onnx
+```
+
+Após a exportação, serão gerados os seguintes arquivos:
+- `credential_detector.onnx`: Modelo em formato ONNX
+- `credential_detector_vectorizer.json`: Dados do vectorizer para processamento de texto
+- `credential_detector_patterns.json`: Padrões de expressões regulares para detecção
+- `credential_detector_config.json`: Configurações do modelo
+- `credential_detector_php_example.php`: Exemplo de implementação em PHP
+- `credential_detector_js_example.js`: Exemplo de implementação em JavaScript
+
+### Usando o modelo em PHP
+
+Para utilizar o modelo em PHP, consulte o [Cliente PHP para Detector de Credenciais](https://github.com/rfschubert/php-credential-detector).
+
+### Usando o modelo em JavaScript
+
+Um exemplo básico de uso do modelo em JavaScript está disponível no arquivo gerado na exportação.
 
 ## Explorando com Jupyter Notebook
 

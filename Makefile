@@ -1,4 +1,4 @@
-.PHONY: build up down test train shell notebook format lint clean help build-rocm train-rocm notebook-rocm up-rocm down-rocm
+.PHONY: build up down test train shell notebook format lint clean help build-rocm train-rocm notebook-rocm up-rocm down-rocm export-onnx export-onnx-rocm
 
 # Variáveis
 PROJECT_NAME = credential-pattern-detector
@@ -54,6 +54,16 @@ lint: ## Executa análise estática de código
 
 clean: ## Remove arquivos temporários e caches
 	docker-compose run --rm app bash -c "find . -type d -name __pycache__ -exec rm -rf {} +; find . -type f -name '*.pyc' -delete; find . -type d -name '.pytest_cache' -exec rm -rf {} +; find . -type d -name '.mypy_cache' -exec rm -rf {} +;"
+
+# Exportar modelo para ONNX
+export-onnx:
+	@echo "Exportando modelo para ONNX..."
+	docker-compose run --rm app python -m src.export.export_onnx --model models/credential_detector_model.pkl --output models/onnx
+
+# Exportar modelo para ONNX com GPU ROCm
+export-onnx-rocm:
+	@echo "Exportando modelo para ONNX com GPU ROCm..."
+	docker-compose -f docker-compose.rocm.yml run --rm app python -m src.export.export_onnx --model models/credential_detector_model.pkl --output models/onnx
 
 # Valor padrão se nenhum alvo for especificado
 .DEFAULT_GOAL := help 
