@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    command: bash -c "pytest -xvs tests/"
+    environment:
+      - PYTHONPATH=/app
+
+  training:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+      - ./models:/app/models
+      - ./data:/app/data
+    command: bash -c "python -m src.training.train_model"
+    environment:
+      - PYTHONPATH=/app
+    # Para GPUs NVIDIA (descomentado)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    # Para GPUs AMD Radeon (ROCm)
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+
+  notebook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+      - ./models:/app/models
+      - ./data:/app/data
+    ports:
+      - "8888:8888"
+    command: bash -c "jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root"
+    environment:
+      - PYTHONPATH=/app 

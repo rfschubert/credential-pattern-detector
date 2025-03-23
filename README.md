@@ -38,6 +38,34 @@ credential-pattern-detector/
 
 ## Instalação
 
+### Usando Docker (Recomendado)
+
+Este projeto utiliza Docker para facilitar o desenvolvimento e garantir reprodutibilidade. 
+Certifique-se de ter o Docker e o Docker Compose instalados no seu sistema.
+
+```bash
+# Clone o repositório
+git clone https://github.com/rfschubert/credential-pattern-detector.git
+cd credential-pattern-detector
+
+# Construir as imagens
+make build
+
+# Executar os testes
+make test
+```
+
+Para usuários com GPU AMD Radeon (ROCm):
+```bash
+# Construir as imagens com suporte a ROCm
+make build-rocm
+
+# Executar os testes com ROCm
+make test-rocm
+```
+
+### Instalação Local (Alternativa)
+
 ```bash
 # Clone o repositório
 git clone https://github.com/rfschubert/credential-pattern-detector.git
@@ -66,8 +94,66 @@ resultado = detector.detect(texto)
 
 if resultado.has_credential:
     print(f"Credencial detectada com confiança: {resultado.confidence}")
+    print(f"Credenciais encontradas: {resultado.matches}")
 else:
     print("Nenhuma credencial detectada")
+```
+
+## Treinamento do Modelo
+
+### Adicionando exemplos personalizados para treinamento
+
+Você pode adicionar seus próprios exemplos para treinamento:
+
+1. Manualmente, usando o script de exemplo:
+
+```bash
+# Com Docker
+docker-compose run --rm app python examples/add_custom_examples.py
+
+# Localmente
+python examples/add_custom_examples.py
+```
+
+2. Através de arquivos:
+   - Adicione exemplos de credenciais em `data/processed/credentials.jsonl`
+   - Adicione exemplos de não-credenciais em `data/processed/non_credentials.jsonl`
+
+### Executando o treinamento
+
+```bash
+# Com Docker
+make train
+
+# Com Docker e GPU AMD (ROCm)
+make train-rocm
+
+# Localmente
+python -m src.training.train_model
+```
+
+Para personalizar o treinamento, edite o arquivo `config/training_config.yaml`.
+
+## Avaliação do Modelo
+
+```bash
+# Com Docker
+docker-compose run --rm app python -m src.evaluation.evaluate --model models/credential_detector_model.pkl
+
+# Localmente
+python -m src.evaluation.evaluate --model models/credential_detector_model.pkl
+```
+
+## Explorando com Jupyter Notebook
+
+```bash
+# Iniciar o Jupyter Notebook
+make notebook
+
+# Para GPU AMD (ROCm)
+make notebook-rocm
+
+# Acesse http://localhost:8888 (ou http://localhost:8889 para ROCm)
 ```
 
 ## Contribuição

@@ -1,0 +1,29 @@
+Acurácia: 0.9875
+
+Relatório de classificação:
+                precision    recall  f1-score   support
+
+Não Credencial       0.98      1.00      0.99        40
+    Credencial       1.00      0.97      0.99        40
+
+      accuracy                           0.99        80
+     macro avg       0.99      0.99      0.99        80
+  weighted avg       0.99      0.99      0.99        80
+
+
+Matriz de confusão:
+[[40  0]
+ [ 1 39]]
+
+Configuração de treinamento:
+model_type: random_forest
+rf_max_depth: 20
+rf_min_samples_leaf: 1
+rf_min_samples_split: 2
+rf_n_estimators: 200
+use_grid_search: false
+vectorizer_max_df: 0.95
+vectorizer_max_features: 1500
+vectorizer_min_df: 2
+vectorizer_ngram_max: 3
+

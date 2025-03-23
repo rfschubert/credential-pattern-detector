@@ -1,0 +1,1 @@
+# Pacote de testes para o detector de credenciais 

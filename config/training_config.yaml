@@ -1,0 +1,19 @@
+# Configuração de treinamento do detector de credenciais
+
+# Tipo de modelo a ser treinado
+model_type: random_forest
+
+# Parâmetros do Random Forest
+rf_n_estimators: 200
+rf_max_depth: 20
+rf_min_samples_split: 2
+rf_min_samples_leaf: 1
+
+# Parâmetros do vectorizer
+vectorizer_max_features: 1500
+vectorizer_min_df: 2
+vectorizer_max_df: 0.95
+vectorizer_ngram_max: 3
+
+# Usar GridSearchCV para otimização de hiperparâmetros
+use_grid_search: false 
