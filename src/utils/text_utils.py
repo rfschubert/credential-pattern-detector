@@ -118,4 +118,28 @@ def tokenize_text(text: str) -> List[str]:
     
     # Divide por espaços e remove tokens vazios
     tokens = [token.strip() for token in text.split() if token.strip()]
-    return tokens 
+    return tokens
+
+def is_binary_text(text: str) -> bool:
+    """
+    Verifica se um texto contém caracteres binários/não-imprimíveis.
+    
+    Args:
+        text: Texto a ser analisado
+        
+    Returns:
+        True se o texto contiver caracteres binários, False caso contrário
+    """
+    # Verificamos caracteres não-ASCII ou controle (exceto espaços, tabs, etc.)
+    for char in text:
+        # Código ASCII 0-31 (excluindo alguns controles comuns) e 127 são caracteres de controle
+        code = ord(char)
+        if (0 <= code <= 8) or (14 <= code <= 31) or (code == 127) or (code > 255):
+            return True
+            
+    # Outra abordagem é verificar se há muitos caracteres não-imprimíveis
+    non_printable_count = sum(1 for c in text if not c.isprintable())
+    if non_printable_count > len(text) * 0.1:  # Mais de 10% são não-imprimíveis
+        return True
+            
+    return False 

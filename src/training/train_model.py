@@ -21,7 +21,7 @@ from tqdm import tqdm
 # Adicionar diretório raiz ao path para importação
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from src.training.data_processor import load_data, generate_datasets
+from src.training.data_processor import DataProcessor
 from src.utils.text_utils import is_binary_text
 
 # Verificar se temos o módulo de exportação
@@ -101,35 +101,29 @@ def train_model(config: Dict[str, Any], train_dir: str = "data/processed", test_
     Returns:
         Dicionário contendo o modelo treinado e métricas
     """
+    # Criar processador de dados
+    data_processor = DataProcessor(data_dir=train_dir, test_size=test_size)
+    
     # Carregar dados de treinamento
-    credentials = load_data(os.path.join(train_dir, "credentials.jsonl"))
-    non_credentials = load_data(os.path.join(train_dir, "non_credentials.jsonl"))
+    data_processor.load_data()
     
     # Gerar conjuntos de dados balanceados
-    train_data, test_data = generate_datasets(
-        credentials, 
-        non_credentials, 
-        test_size=test_size
-    )
+    X_train, y_train, X_test, y_test = data_processor.generate_train_test_split()
     
     # Extrair características
     logger.info("Extraindo características dos dados de treinamento...")
     X_train_features = []
-    y_train = []
     
-    for text, label in tqdm(train_data, desc="Extraindo características"):
+    for text in tqdm(X_train, desc="Extraindo características de treino"):
         features = extract_features(text)
         X_train_features.append(features)
-        y_train.append(label)
     
     logger.info("Extraindo características dos dados de teste...")
     X_test_features = []
-    y_test = []
     
-    for text, label in tqdm(test_data, desc="Extraindo características"):
+    for text in tqdm(X_test, desc="Extraindo características de teste"):
         features = extract_features(text)
         X_test_features.append(features)
-        y_test.append(label)
     
     # Vetorização de texto
     logger.info("Treinando o vectorizer TF-IDF...")
@@ -248,24 +242,15 @@ def main() -> None:
     if ONNX_AVAILABLE:
         logger.info("Exportando modelo para ONNX...")
         onnx_output_dir = "models/onnx"
-        try:
-            export_results = export_to_onnx(
-                model_path=model_path,
-                output_dir=onnx_output_dir,
-                model_name="credential_detector",
-                test_examples=[
-                    "Olá, como vai você?",
-                    "Minha senha é X#9pL@7!2ZqR e meu usuário é joao123",
-                    "API_KEY=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
-                    "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ"
-                ]
-            )
-            logger.info(f"Modelo exportado com sucesso para ONNX em {onnx_output_dir}")
-            for key, path in export_results.items():
-                logger.info(f"- {key}: {path}")
-        except Exception as e:
-            logger.error(f"Erro ao exportar modelo para ONNX: {e}")
-            logger.exception(e)
+        os.makedirs(onnx_output_dir, exist_ok=True)
+        
+        export_to_onnx(
+            model_path=model_path,
+            output_dir=onnx_output_dir
+        )
+        logger.info(f"Modelo exportado para ONNX em {onnx_output_dir}")
+    else:
+        logger.warning("Exportação para ONNX não disponível. Instale os pacotes necessários.")
 
 if __name__ == "__main__":
     main() 

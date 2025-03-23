@@ -147,10 +147,26 @@ class DataProcessor:
         """
         data = []
         with open(file_path, 'r', encoding='utf-8') as f:
-            for line in f:
+            for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if line:
-                    data.append(json.loads(line))
+                    try:
+                        data.append(json.loads(line))
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Erro ao analisar JSON na linha {line_num} do arquivo {file_path}: {e}")
+                        logger.warning(f"Conteúdo da linha: {line[:100]}...")
+                        # Tenta reparar linhas com múltiplos objetos JSON
+                        if '}{' in line:
+                            logger.info(f"Tentando reparar linha {line_num} com múltiplos objetos JSON")
+                            # Divida a linha em múltiplos objetos JSON
+                            parts = line.replace('}{', '}|{').split('|')
+                            for part in parts:
+                                try:
+                                    if part.strip():
+                                        data.append(json.loads(part))
+                                except json.JSONDecodeError:
+                                    logger.warning(f"Não foi possível reparar parte da linha: {part[:50]}...")
+                        continue
         return data
     
     def load_from_csv(self, file_path: str, has_header: bool = True, 

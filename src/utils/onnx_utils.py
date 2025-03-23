@@ -10,6 +10,7 @@ que permite compartilhar modelos entre diferentes frameworks.
 import os
 import pickle
 import logging
+import json
 from typing import Any, Dict, Optional, Tuple, List
 
 import numpy as np
@@ -19,6 +20,17 @@ from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import FloatTensorType
 
 logger = logging.getLogger(__name__)
+
+# Classe auxiliar para serializar objetos NumPy
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+            return float(obj)
+        elif isinstance(obj, (np.ndarray,)):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
 
 def convert_sklearn_model_to_onnx(
     model: Any,
@@ -76,18 +88,22 @@ def convert_vectorizer_to_onnx(
     Returns:
         Dicionário com os parâmetros do vectorizer e caminho para o arquivo salvo
     """
-    import json
-    
     # Extrair parâmetros do vectorizer
+    vocab_dict = {}
+    for word, idx in vectorizer.vocabulary_.items():
+        # Converter chaves para strings se forem bytes
+        word_key = word.decode('utf-8') if isinstance(word, bytes) else word
+        vocab_dict[word_key] = int(idx)
+    
     vectorizer_data = {
-        "vocabulary": vectorizer.vocabulary_,
+        "vocabulary": vocab_dict,
         "idf": vectorizer.idf_.tolist() if hasattr(vectorizer, 'idf_') else None,
         "stop_words": list(vectorizer.stop_words_) if hasattr(vectorizer, 'stop_words_') and vectorizer.stop_words_ else None,
         "ngram_range": vectorizer.ngram_range,
         "norm": vectorizer.norm,
-        "max_df": vectorizer.max_df,
-        "min_df": vectorizer.min_df,
-        "max_features": vectorizer.max_features,
+        "max_df": float(vectorizer.max_df) if isinstance(vectorizer.max_df, (np.floating, np.integer)) else vectorizer.max_df,
+        "min_df": float(vectorizer.min_df) if isinstance(vectorizer.min_df, (np.floating, np.integer)) else vectorizer.min_df,
+        "max_features": int(vectorizer.max_features) if vectorizer.max_features is not None else None,
         "model_name": model_name
     }
     
@@ -95,7 +111,7 @@ def convert_vectorizer_to_onnx(
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(vectorizer_data, f, ensure_ascii=False, indent=2)
+            json.dump(vectorizer_data, f, ensure_ascii=False, indent=2, cls=NumpyEncoder)
         logger.info(f"Dados do vectorizer salvos em: {output_path}")
     
     return vectorizer_data, output_path
@@ -151,7 +167,6 @@ def convert_credential_detector_to_onnx(
     )
     
     # Salvar a configuração
-    import json
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump({
             "model_name": model_name,
@@ -161,7 +176,7 @@ def convert_credential_detector_to_onnx(
             "feature_names": list(vectorizer.get_feature_names_out()) if hasattr(vectorizer, 'get_feature_names_out') else [],
             "patterns": model_data.get("patterns", {}),
             "confidence_threshold": model_data.get("confidence_threshold", 0.7)
-        }, f, ensure_ascii=False, indent=2)
+        }, f, ensure_ascii=False, indent=2, cls=NumpyEncoder)
     
     logger.info(f"Conversão ONNX concluída. Arquivos salvos em: {output_dir}")
     
